@@ -1,0 +1,159 @@
+graphics.off()  # clear all graphs
+rm(list = ls()) # remove all files from your workspace
+
+library(quadprogXT) # solveQPXT
+library(MASS)       # mvrnorm
+
+setwd('C:/Users/Alifia Nadya/Downloads')
+
+# This dataset exists in appendix of Michaud and Michaud (2007)
+df.data <- read.csv('m-fac9003(3).csv')
+head(df.data)
+
+mu = c()
+sd = c()
+
+for (data in df.data){
+  mu = c(mu,round(mean(data),3))
+  sd = c(sd,round(sd(data),3))
+}
+
+corr <- cor(df.data)
+round(corr,2)
+
+# number of asset
+nvar <- length(mu)
+var.name <- colnames(df.data)
+
+# convert correlation to covariance matrix
+cov <- diag(sd)%*%corr%*%diag(sd)
+
+#-----------------------------------------------------
+# Traditional portfolio optimization
+#-----------------------------------------------------
+
+n.er <- 100  # number of EF points
+rset <- seq(min(mu),max(mu),length=n.er+2)
+rset <- rset[2:n.er+1]
+
+port1.ret <- rset
+port1.std <- rset*0
+port1.wgt <- matrix(0,n.er,nvar)
+
+# calculate efficient frontier
+for (i in 1:c(n.er-1)) {
+  Dmat <- 2*cov
+  dvec <- rep(0,nvar) #c(0,0)
+  Amat <- t(rbind(t(rep(1,nvar)),t(mu),diag(nvar)))
+  bvec <- c(1,rset[i],rep(0,nvar))
+  
+  # mean-variance optimization
+  m<-solveQPXT(Dmat,dvec,Amat,bvec,meq=2,factorized=FALSE)
+  
+  # output
+  port1.std[i]  <- sqrt(m$value)
+  port1.wgt[i,] <- t(m$solution)
+}
+
+# draw efficient fronter and allocation profile
+x11(width=6); par(mfrow = c(2,1), mar = c(3,2,2,3), xpd=TRUE)
+
+# individual asset
+plot(sqrt(diag(cov)), mu,
+     xlim=c(0.8*min(port1.std),1.2*max(port1.std)), 
+     ylim=c(0.8*min(mu),1.2*max(mu)),
+     col = rainbow(nvar), lwd = 10)
+text(sqrt(diag(cov)), mu, 
+     labels=var.name, cex= 1)
+
+# efficient frontier
+lines(port1.std,port1.ret,col = "green", lwd = 6)
+
+# weight
+barplot(t(port1.wgt),col=rainbow(nvar))
+legend("topright", legend = var.name,
+       fill = rainbow(nvar), ncol = 1,
+       inset=c(-0.07,0), cex = 0.6)
+
+#-----------------------------------------------------
+# Resampled portfolio optimization
+#-----------------------------------------------------
+
+n.er <- 100  # number of EF points
+rset <- seq(min(mu),max(mu),length=(n.er+2))
+rset <- rset[2:(n.er+1)]
+
+port.re.ret <- rset
+port.re.std <- rset*0
+port.re.wgt <- matrix(0,n.er,nvar)
+
+n.rr = 1000  # number of resampling
+
+for (rr in 1:n.rr) {
+  print(rr)
+  
+  # simulated time series of assets
+  sim     <- mvrnorm(n = 120, mu, cov)
+  
+  # simulated mu & cov
+  mu.sim  <- colMeans(sim)
+  cov.sim <- cov(sim)
+  
+  rset.sim <- seq(min(mu.sim),max(mu.sim),length=(n.er+2))
+  rset.sim <- rset.sim[2:(n.er+1)]
+  
+  port.sim.ret <- rset.sim
+  port.sim.std <- rset.sim*0
+  port.sim.wgt <- matrix(0,n.er,nvar)
+  
+  # calculate efficient frontier
+  for (i in 1:n.er) {
+    Dmat <- 2*cov.sim
+    dvec <- rep(0,nvar) 
+    Amat <- t(rbind(t(rep(1,nvar)),t(mu.sim),diag(nvar)))
+    bvec <- c(1,rset.sim[i],rep(0,nvar))
+    
+    # mean-variance optimization
+    m<-solveQPXT(Dmat,dvec,Amat,bvec,meq=2,factorized=FALSE)
+    
+    # output
+    port.sim.std[i]  <- sqrt(m$value)
+    port.sim.wgt[i,] <- t(m$solution)
+  }  
+  
+  # sum of resampling portfolios before average
+  port.re.ret <- port.re.ret + port.sim.ret
+  port.re.wgt <- port.re.wgt + port.sim.wgt
+}
+
+# average of resampling portfolios
+port.re.wgt <- port.re.wgt/n.rr
+port.re.ret <- port.re.ret/n.rr
+
+# portfolio SD and Expexted Return 
+for (i in 1:n.er) {
+  port.re.ret[i] <- port.re.wgt[i,]%*%mu
+  port.re.std[i] <- sqrt(port.re.wgt[i,]%*%cov%*%port.re.wgt[i,])
+}
+
+# draw efficient fronter and allocation profile
+x11(width=6); par(mfrow = c(2,1), mar = c(3,2,2,3), xpd=TRUE)
+
+# individual asset
+plot(sqrt(diag(cov)), mu,
+     xlim=c(0.8*min(port1.std),1.2*max(port1.std)),
+     ylim=c(0.8*min(mu),1.2*max(mu)),
+     col = rainbow(nvar), lwd = 10)
+text(sqrt(diag(cov)), mu,
+     labels=colnames(df.data), cex= 1)
+
+# efficient frontier
+lines(port1.std,     port1.ret,col = "green" , lwd = 10)
+lines(port.re.std, port.re.ret,col = "blue", lwd = 4)
+
+
+# weight
+barplot(t(port.re.wgt),col=rainbow(nvar))
+legend("topright", legend = var.name,
+       fill = rainbow(nvar), ncol = 1,
+       inset=c(-0.07,0), cex = 0.6)
